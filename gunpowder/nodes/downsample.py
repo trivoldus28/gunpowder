@@ -41,6 +41,7 @@ class DownSample(BatchFilter):
 
         spec = self.spec[self.source].copy()
         spec.voxel_size *= self.factor
+        #print(self.spec)
         self.provides(self.target, spec)
 
     def prepare(self, request):

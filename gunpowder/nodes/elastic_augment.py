@@ -51,7 +51,9 @@ class ElasticAugment(BatchFilter):
             prob_slip=0,
             prob_shift=0,
             max_misalign=0,
-            subsample=1):
+            subsample=1,
+            upstream_n_downsample=None,
+            voxel_size=None):
 
         self.control_point_spacing = control_point_spacing
         self.jitter_sigma = jitter_sigma
@@ -61,11 +63,14 @@ class ElasticAugment(BatchFilter):
         self.prob_shift = prob_shift
         self.max_misalign = max_misalign
         self.subsample = subsample
+        self.voxel_size = voxel_size
+        self.upstream_n_downsample = upstream_n_downsample
 
     def prepare(self, request):
 
         # get the voxel size
-        self.voxel_size = self.__get_common_voxel_size(request)
+        if self.voxel_size is None:
+            self.voxel_size = self.__get_common_voxel_size(request)
 
         # get the total ROI of all requests
         total_roi = request.get_total_roi()
@@ -166,11 +171,17 @@ class ElasticAugment(BatchFilter):
                 spec.roi.get_begin()[:-3] + source_roi.get_begin()[-3:],
                 spec.roi.get_shape()[:-3] + source_roi.get_shape()[-3:])
 
+            ds = self.upstream_n_downsample
+            if ds is not None:
+                spec.roi.set_shape(spec.roi.get_shape() * Coordinate(ds))
+
             logger.debug("upstream request roi for %s = %s" % (key, spec.roi))
 
     def process(self, batch, request):
 
         for (array_key, array) in batch.arrays.items():
+
+            #print(array_key)
 
             # for arrays, the target ROI and the requested ROI should be the
             # same in spatial coordinates
@@ -185,6 +196,8 @@ class ElasticAugment(BatchFilter):
             shape = array.data.shape
             data = array.data.reshape((-1,) + shape[-self.spatial_dims:])
 
+            #print(shape)
+
             # apply transformation on each channel
             data = np.array([
                 augment.apply_transformation(
@@ -194,7 +207,12 @@ class ElasticAugment(BatchFilter):
                 for c in range(data.shape[0])
             ])
 
-            data_roi = request[array_key].roi/self.spec[array_key].voxel_size
+            #data_roi = request[array_key].roi/self.spec[array_key].voxel_size
+            data_roi = request[array_key].roi/self.voxel_size
+
+            #print(request[array_key].roi)
+            #print(self.spec[array_key].voxel_size)
+            #print(data_roi)
             array.data = data.reshape(data_roi.get_shape())
 
             # restore original ROIs
