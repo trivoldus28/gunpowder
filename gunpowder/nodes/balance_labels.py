@@ -9,32 +9,47 @@ logger = logging.getLogger(__name__)
 
 
 class BalanceLabels(BatchFilter):
-    '''Creates a scale array to balance the loss between positive and negative
-    labels.
+    '''Creates a scale array to balance the loss between class labels.
+
+    Note that this only balances loss weights per-batch and does not accumulate
+    statistics about class balance across batches.
 
     Args:
 
-        labels (:class:``ArrayKey``): A array containing binary labels.
+        labels (:class:`ArrayKey`):
 
-        scales (:class:``ArrayKey``): A array with scales to be created. This
-            new array will have the same ROI and resolution as `labels`.
+            An array containing binary or integer labels.
 
-        mask (:class:``ArrayKey``, optional): An optional mask (or list of
-            masks) to consider for balancing. Every voxel marked with a 0 will
-            not contribute to the scaling and will have a scale of 0 in
-            `scales`.
+        scales (:class:`ArrayKey`):
 
-        slab (tuple of int, optional): A shape specification to perform the
-            balancing in slabs of this size. -1 can be used to refer to the
-            actual size of the label array. For example, a slab of::
+            A array with scales to be created. This new array will have the
+            same ROI and resolution as ``labels``.
+
+        mask (:class:`ArrayKey`, optional):
+
+            An optional mask (or list of masks) to consider for balancing.
+            Every voxel marked with a 0 will not contribute to the scaling and
+            will have a scale of 0 in ``scales``.
+
+        slab (``tuple`` of ``int``, optional):
+
+            A shape specification to perform the balancing in slabs of this
+            size. -1 can be used to refer to the actual size of the label
+            array. For example, a slab of::
 
                 (2, -1, -1, -1)
 
-            will perform the balancing for every each slice `(0:2,:)`,
-            `(2:4,:)`, ... individually.
+            will perform the balancing for every each slice ``[0:2,:]``,
+            ``[2:4,:]``, ... individually.
+
+        num_classes(``int``, optional):
+
+            The number of classes. Labels will be expected to be in the
+            interval [0, ``num_classes``). Defaults to 2 for binary
+            classification.
     '''
 
-    def __init__(self, labels, scales, mask=None, slab=None):
+    def __init__(self, labels, scales, mask=None, slab=None, num_classes=2):
 
         self.labels = labels
         self.scales = scales
@@ -46,6 +61,7 @@ class BalanceLabels(BatchFilter):
             self.masks = mask
 
         self.slab = slab
+        self.num_classes = num_classes
 
     def setup(self):
 
@@ -66,12 +82,12 @@ class BalanceLabels(BatchFilter):
 
         labels = batch.arrays[self.labels]
 
-        assert len(np.unique(labels.data)) <= 2, (
-            "Found more than two labels in %s."%self.labels)
-        assert np.min(labels.data) in [0.0, 1.0], (
-            "Labels %s are not binary."%self.labels)
-        assert np.max(labels.data) in [0.0, 1.0], (
-            "Labels %s are not binary."%self.labels)
+        assert len(np.unique(labels.data)) <= self.num_classes, (
+            "Found more unique labels than classes in %s."%self.labels)
+        assert 0 <= np.min(labels.data) < self.num_classes, (
+            "Labels %s are not in [0, num_classes)."%self.labels)
+        assert 0 <= np.max(labels.data) < self.num_classes, (
+            "Labels %s are not in [0, num_classes)."%self.labels)
 
         # initialize error scale with 1s
         error_scale = np.ones(labels.data.shape, dtype=np.float32)
@@ -113,16 +129,16 @@ class BalanceLabels(BatchFilter):
 
     def __balance(self, labels, scale):
 
-        # in the masked-in area, compute the fraction of positive samples
+        # in the masked-in area, compute the fraction of per-class samples
         masked_in = scale.sum()
-        num_pos  = (labels*scale).sum()
-        frac_pos = float(num_pos) / masked_in if masked_in > 0 else 0
-        frac_pos = np.clip(frac_pos, 0.05, 0.95)
-        frac_neg = 1.0 - frac_pos
+        classes, counts = np.unique(labels[np.nonzero(scale)], return_counts=True)
+        fracs = counts.astype(float) / masked_in if masked_in > 0 else np.zeros(counts.size)
+        np.clip(fracs, 0.05, 0.95, fracs)
 
-        # compute the class weights for positive and negative samples
-        w_pos = 1.0 / (2.0 * frac_pos)
-        w_neg = 1.0 / (2.0 * frac_neg)
+        # compute the class weights
+        w_sparse = 1.0 / float(self.num_classes) / fracs
+        w = np.zeros(self.num_classes)
+        w[classes] = w_sparse
 
         # scale the masked-in scale with the class weights
-        scale *= (labels >= 0.5) * w_pos + (labels < 0.5) * w_neg
+        scale *= np.take(w, labels)

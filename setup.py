@@ -7,7 +7,6 @@ except ImportError:
 
 extras_require = {
     'tensorflow': ['tensorflow'],
-    'test': ['tox']
 }
 
 
@@ -24,7 +23,7 @@ subprocess.call('pip install git+https://github.com/funkey/augment#egg=augment'.
 
 setup(
         name='gunpowder',
-        version='0.3',
+        version='0.3.2',
         description='Data loading DAG for Greentea.',
         url='https://github.com/funkey/gunpowder',
         author='Jan Funke',
@@ -39,7 +38,9 @@ setup(
             'gunpowder.tensorflow.nodes',
             'gunpowder.contrib',
             'gunpowder.contrib.nodes',
-            'gunpowder.ext'
+            'gunpowder.ext',
+            'gunpowder.zoo',
+            'gunpowder.zoo.tensorflow'
         ],
         install_requires=[
             "numpy",

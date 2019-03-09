@@ -15,8 +15,10 @@ class PrintProfilingStats(BatchFilter):
 
     Args:
 
-        every (int): Collect statistics about that many batch requests and show 
-            min, max, mean, and median runtimes.
+        every (``int``):
+
+            Collect statistics about that many batch requests and show min,
+            max, mean, and median runtimes.
     '''
 
     def __init__(self, every=1):
@@ -71,7 +73,7 @@ class PrintProfilingStats(BatchFilter):
         stats += "MEDIAN".ljust(10)
         stats += "\n"
 
-        summaries = self.accumulated_stats.get_timing_summaries().items()
+        summaries = list(self.accumulated_stats.get_timing_summaries().items())
         summaries.sort()
 
         for (node_name, method_name), summary in summaries:

@@ -21,13 +21,13 @@ class Pad(BatchFilter):
 
             The array or points set to pad.
 
-        size (Coordinate or None):
+        size (:class:`Coordinate` or ``None``):
 
             The padding to be added. If None, an infinite padding is added. If
-            a Coordinate, this amount will be added to the ROI in the positive
+            a coordinate, this amount will be added to the ROI in the positive
             and negative direction.
 
-        value (scalar or None):
+        value (scalar or ``None``):
 
             The value to report inside the padding. If not given, 0 is used.
             Only used for :class:`Array<Arrays>`.
@@ -64,7 +64,7 @@ class Pad(BatchFilter):
         if self.key not in request:
             return
 
-        roi = request[self.key].roi
+        roi = request[self.key].roi.copy()
 
         # change request to fit into upstream spec
         request[self.key].roi = roi.intersect(upstream_spec[self.key].roi)
@@ -72,8 +72,8 @@ class Pad(BatchFilter):
         if request[self.key].roi.empty():
 
             logger.warning(
-                "Requested %s ROI lies entirely outside of upstream "
-                "ROI.", self.key)
+                "Requested %s ROI %s lies entirely outside of upstream "
+                "ROI %s.", self.key, roi, upstream_spec[self.key].roi)
 
             # ensure a valid request by asking for empty ROI
             request[self.key].roi = Roi(
@@ -103,7 +103,7 @@ class Pad(BatchFilter):
         else:
 
             points = batch.points[self.key]
-            points.spec.roi = request[points_key].roi
+            points.spec.roi = request[self.key].roi
 
     def __expand(self, a, from_roi, to_roi, value):
         '''from_roi and to_roi should be in voxels.'''
@@ -112,17 +112,20 @@ class Pad(BatchFilter):
             "expanding array of shape %s from %s to %s",
             str(a.shape), from_roi, to_roi)
 
-        b = np.zeros(to_roi.get_shape(), dtype=a.dtype)
+        num_channels = len(a.shape) - from_roi.dims()
+        channel_shapes = a.shape[:num_channels]
+
+        b = np.zeros(channel_shapes + to_roi.get_shape(), dtype=a.dtype)
         if value != 0:
             b[:] = value
 
         shift = tuple(-x for x in to_roi.get_offset())
         logger.debug("shifting 'from' by " + str(shift))
-        a_in_b = from_roi.shift(shift).get_bounding_box()
+        a_in_b = from_roi.shift(shift).to_slices()
 
         logger.debug("target shape is " + str(b.shape))
         logger.debug("target slice is " + str(a_in_b))
 
-        b[a_in_b] = a
+        b[(slice(None),)*num_channels + a_in_b] = a
 
         return b

@@ -20,17 +20,24 @@ class Scan(BatchFilter):
     upstream requests will be contained in the downstream requested ROI or
     upstream ROIs.
 
+    See also :class:`Hdf5Write`.
+
     Args:
 
-        reference(:class:`BatchRequest`): A reference :class:`BatchRequest`.
-            This request will be shifted in a scanning fashion over the
-            upstream ROIs of the requested arrays or points.
+        reference (:class:`BatchRequest`):
 
-        num_workers (int, optional): If set to >1, upstream requests are made
-            in parallel with that number of workers.
+            A reference :class:`BatchRequest`. This request will be shifted in
+            a scanning fashion over the upstream ROIs of the requested arrays
+            or points.
 
-        cache_size (int, optional): If multiple workers are used, how many
-            batches to hold at most.
+        num_workers (``int``, optional):
+
+            If set to >1, upstream requests are made in parallel with that
+            number of workers.
+
+        cache_size (``int``, optional):
+
+            If multiple workers are used, how many batches to hold at most.
     '''
 
     def __init__(self, reference, num_workers=1, cache_size=50):
@@ -88,7 +95,7 @@ class Scan(BatchFilter):
                 if not empty_request:
                     self.__add_to_batch(request, chunk)
 
-                logger.info("processed chunk %d/%d", i, num_chunks)
+                logger.info("processed chunk %d/%d", i + 1, num_chunks)
 
         else:
 
@@ -100,7 +107,7 @@ class Scan(BatchFilter):
                 if not empty_request:
                     self.__add_to_batch(request, chunk)
 
-                logger.info("processed chunk %d/%d", i, num_chunks)
+                logger.info("processed chunk %d/%d", i + 1, num_chunks)
 
         batch = self.batch
         self.batch = None
@@ -154,10 +161,26 @@ class Scan(BatchFilter):
         # get individual shift ROIs and intersect them
         for key, reference_spec in self.reference.items():
 
+            logger.debug(
+                "getting shift roi for %s with spec %s",
+                key,
+                reference_spec)
+
             if key not in spec:
+                logger.debug("skipping, %s not in upstream spec", key)
                 continue
             if spec[key].roi is None:
+                logger.debug("skipping, %s has not ROI", key)
                 continue
+
+            logger.debug("upstream ROI is %s", spec[key].roi)
+
+            for r, s in zip(
+                    reference_spec.roi.get_shape(),
+                    spec[key].roi.get_shape()):
+                assert r <= s, (
+                    "reference %s with ROI %s does not fit into provided "
+                    "upstream %s"%(key, reference_spec.roi, spec[key].roi))
 
             # we have a reference ROI
             #
@@ -200,6 +223,8 @@ class Scan(BatchFilter):
             # create a ROI...
             shift_roi = Roi(shift_begin, shift_shape)
 
+            logger.debug("shift ROI for %s is %s", key, shift_roi)
+
             # ...and intersect it with previous shift ROIs
             if total_shift_roi is None:
                 total_shift_roi = shift_roi
@@ -210,6 +235,9 @@ class Scan(BatchFilter):
                                        "the reference %s are contained in the "
                                        "request/upstream ROIs "
                                        "%s."%(self.reference, spec))
+
+            logger.debug("intersected with total shift ROI this yields %s",
+                    total_shift_roi)
 
         if total_shift_roi is None:
             raise RuntimeError("None of the upstream ROIs are bounded (all "

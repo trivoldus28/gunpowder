@@ -16,31 +16,53 @@ class ElasticAugment(BatchFilter):
     loss due to rotation and jitter.
 
     Args:
-        control_point_spacing (tuple of int): Distance between control points 
-            for the elastic deformation, in voxels per dimension.
 
-        jitter_sigma (tuple of float): Standard deviation of control point 
-            jitter distribution, in voxels per dimension.
+        control_point_spacing (``tuple`` of ``int``):
 
-        rotation_interval (two floats): Interval to randomly sample rotation 
-            angles from (0,2PI).
+            Distance between control points for the elastic deformation, in
+            voxels per dimension.
 
-        prob_slip (float): Probability of a section to "slip", i.e., be 
-            independently moved in x-y.
+        jitter_sigma (``tuple`` of ``float``):
 
-        prob_shift (float): Probability of a section and all following sections 
-            to move in x-y.
+            Standard deviation of control point jitter distribution, in voxels
+            per dimension.
 
-        max_misalign (int): Maximal voxels to shift in x and y. Samples will be 
-            drawn uniformly.
+        rotation_interval (``tuple`` of two ``floats``):
 
-        subsample (int): Instead of creating an elastic transformation on the 
-            full resolution, create one subsampled by the given factor, and 
-            linearly interpolate to obtain the full resolution transformation. 
-            This can significantly speed up this node, at the expense of having 
-            visible piecewise linear deformations for large factors. Usually, a 
-            factor of 4 can savely by used without noticable changes. However, 
-            the default is 1 (i.e., no subsampling).
+            Interval to randomly sample rotation angles from (0, 2PI).
+
+        prob_slip (``float``):
+
+            Probability of a section to "slip", i.e., be independently moved in
+            x-y.
+
+        prob_shift (``float``):
+
+            Probability of a section and all following sections to move in x-y.
+
+        max_misalign (``int``):
+
+            Maximal voxels to shift in x and y. Samples will be drawn
+            uniformly. Used if ``prob_slip + prob_shift`` > 0.
+
+        subsample (``int``):
+
+            Instead of creating an elastic transformation on the full
+            resolution, create one subsampled by the given factor, and linearly
+            interpolate to obtain the full resolution transformation. This can
+            significantly speed up this node, at the expense of having visible
+            piecewise linear deformations for large factors. Usually, a factor
+            of 4 can savely by used without noticable changes. However, the
+            default is 1 (i.e., no subsampling).
+
+        spatial_dims (``int``):
+
+            The number of spatial dimensions in arrays. Spatial dimensions are
+            assumed to be the last ones and cannot be more than 3 (default).
+            Set this value here to avoid treating channels as spacial
+            dimension. If, for example, your array is indexed as ``(c,y,x)``
+            (2D plus channels), you would want to set ``spatial_dims=2`` to
+            perform the elastic deformation only on x and y.
     '''
 
     def __init__(
@@ -52,8 +74,8 @@ class ElasticAugment(BatchFilter):
             prob_shift=0,
             max_misalign=0,
             subsample=1,
-            upstream_n_downsample=None,
-            voxel_size=None):
+            voxel_size=None,
+            spatial_dims=3):
 
         self.control_point_spacing = control_point_spacing
         self.jitter_sigma = jitter_sigma
@@ -64,7 +86,7 @@ class ElasticAugment(BatchFilter):
         self.max_misalign = max_misalign
         self.subsample = subsample
         self.voxel_size = voxel_size
-        self.upstream_n_downsample = upstream_n_downsample
+        self.spatial_dims = spatial_dims
 
     def prepare(self, request):
 
@@ -81,8 +103,8 @@ class ElasticAugment(BatchFilter):
 
         # get master ROI
         master_roi = Roi(
-            total_roi.get_begin()[-3:],
-            total_roi.get_shape()[-3:])
+            total_roi.get_begin()[-self.spatial_dims:],
+            total_roi.get_shape()[-self.spatial_dims:])
         self.spatial_dims = master_roi.dims()
         logger.debug("master ROI is %s"%master_roi)
 
@@ -113,8 +135,8 @@ class ElasticAugment(BatchFilter):
         for key, spec in request.items():
 
             target_roi = Roi(
-                spec.roi.get_begin()[-3:],
-                spec.roi.get_shape()[-3:])
+                spec.roi.get_begin()[-self.spatial_dims:],
+                spec.roi.get_shape()[-self.spatial_dims:])
             logger.debug(
                 "downstream request spatial ROI for %s is %s", key, target_roi)
 
@@ -168,12 +190,8 @@ class ElasticAugment(BatchFilter):
 
             # update upstream request
             spec.roi = Roi(
-                spec.roi.get_begin()[:-3] + source_roi.get_begin()[-3:],
-                spec.roi.get_shape()[:-3] + source_roi.get_shape()[-3:])
-
-            ds = self.upstream_n_downsample
-            if ds is not None:
-                spec.roi.set_shape(spec.roi.get_shape() * Coordinate(ds))
+                spec.roi.get_begin()[:-self.spatial_dims] + source_roi.get_begin()[-self.spatial_dims:],
+                spec.roi.get_shape()[:-self.spatial_dims] + source_roi.get_shape()[-self.spatial_dims:])
 
             logger.debug("upstream request roi for %s = %s" % (key, spec.roi))
 
@@ -187,10 +205,10 @@ class ElasticAugment(BatchFilter):
             # same in spatial coordinates
             assert (
                 self.target_rois[array_key].get_begin() ==
-                request[array_key].roi.get_begin()[-3:])
+                request[array_key].roi.get_begin()[-self.spatial_dims:])
             assert (
                 self.target_rois[array_key].get_shape() ==
-                request[array_key].roi.get_shape()[-3:])
+                request[array_key].roi.get_shape()[-self.spatial_dims:])
 
             # reshape array data into (channels,) + spatial dims
             shape = array.data.shape
@@ -220,7 +238,7 @@ class ElasticAugment(BatchFilter):
 
         for (points_key, points) in batch.points.items():
 
-            for point_id, point in points.data.items():
+            for point_id, point in list(points.data.items()):
 
                 logger.debug("projecting %s", point.location)
 
@@ -229,7 +247,7 @@ class ElasticAugment(BatchFilter):
                 logger.debug("relative to upstream ROI: %s", location)
 
                 # get spatial coordinates of point in voxels
-                location_voxels = location[-3:]/self.voxel_size
+                location_voxels = location[-self.spatial_dims:]/self.voxel_size
                 logger.debug(
                     "relative to upstream ROI in voxels: %s",
                     location_voxels)
@@ -260,7 +278,7 @@ class ElasticAugment(BatchFilter):
                 projected += np.array(self.target_rois[points_key].get_begin())
 
                 # update spatial coordinates of point location
-                point.location[-3:] = projected
+                point.location[-self.spatial_dims:] = projected
 
                 logger.debug("final location: %s", point.location)
 
@@ -281,9 +299,9 @@ class ElasticAugment(BatchFilter):
         prev = None
         for array_key in request.array_specs.keys():
             if voxel_size is None:
-                voxel_size = self.spec[array_key].voxel_size[-3:]
+                voxel_size = self.spec[array_key].voxel_size[-self.spatial_dims:]
             else:
-                assert voxel_size == self.spec[array_key].voxel_size[-3:], \
+                assert voxel_size == self.spec[array_key].voxel_size[-self.spatial_dims:], \
                         "ElasticAugment can only be used with arrays of same voxel sizes, " \
                         "but %s has %s, and %s has %s."%(
                                 array_key, self.spec[array_key].voxel_size,
@@ -418,6 +436,9 @@ class ElasticAugment(BatchFilter):
             transformation[d] += shift[d]
 
     def __misalign(self, transformation):
+
+        assert transformation.shape[0] == 3, (
+            "misalign can only be applied to 3D volumes")
 
         num_sections = transformation[0].shape[0]
 
