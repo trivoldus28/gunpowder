@@ -214,13 +214,13 @@ class BatchProvider(object):
                 data_shape = Coordinate(array.data.shape[-dims:])
                 voxel_size = self.spec[array_key].voxel_size
                 #assert data_shape == request_spec.roi.get_shape()/voxel_size, "%s ROI %s requested, but size of array is %s*%s=%s provided by %s."%(
-                        array_key,
-                        request_spec.roi,
-                        data_shape,
-                        voxel_size,
-                        data_shape*voxel_size,
-                        self.name()
-                )
+                #        array_key,
+                #        request_spec.roi,
+                #        data_shape,
+                #        voxel_size,
+                #        data_shape*voxel_size,
+                #        self.name()
+                #)
 
         for (points_key, request_spec) in request.points_specs.items():
 
